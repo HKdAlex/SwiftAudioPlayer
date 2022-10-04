@@ -22,22 +22,21 @@
 //  LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 //  OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 //  THE SOFTWARE.
-
 import Foundation
 
 protocol AudioDataManagable {
+    var currentStreamFinished: Bool { get }
+    var currentStreamFinishedWithDuration: Duration { get }
     var numberOfQueued: Int { get }
     var numberOfActive: Int { get }
     
     var allowCellular: Bool { get set }
-    var downloadDirectory: FileManager.SearchPathDirectory { get }
     
-    func setHTTPHeaderFields(_ fields: [String: String]?)
     func setBackgroundCompletionHandler(_ completionHandler: @escaping () -> ())
     func setAllowCellularDownloadPreference(_ preference: Bool)
-    func setDownloadDirectory(_ dir: FileManager.SearchPathDirectory)
     
     func clear()
+    func updateDuration(d: Duration)
     
     //Director pattern
     func attach(callback: @escaping (_ id: ID, _ progress: Double)->())
@@ -49,14 +48,18 @@ protocol AudioDataManagable {
     func deleteStream(withRemoteURL url: AudioURL) 
     
     func getPersistedUrl(withRemoteURL url: AudioURL) -> URL?
-    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL, Error?) -> ())
+    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL) -> ())
     func cancelDownload(withRemoteURL url: AudioURL)
     func deleteDownload(withLocalURL url: URL)
 }
 
 class AudioDataManager: AudioDataManagable {
+    var currentStreamFinishedWithDuration: Duration = 0
+    
     var allowCellular: Bool = true
-    var downloadDirectory: FileManager.SearchPathDirectory = .documentDirectory
+    
+    public var currentStreamFinished = false
+    public var totalStreamedDuration = 0
     
     static let shared: AudioDataManagable = AudioDataManager()
     
@@ -96,13 +99,12 @@ class AudioDataManager: AudioDataManagable {
             doneCallback: streamDoneListener)
     }
     
-    func clear() {
-        streamingCallbacks = []
+    func updateDuration(d: Duration) {
+        currentStreamFinishedWithDuration = d
     }
     
-    func setHTTPHeaderFields(_ fields: [String: String]?) {
-        streamWorker.HTTPHeaderFields = fields
-        downloadWorker.HTTPHeaderFields = fields
+    func clear() {
+        streamingCallbacks = []
     }
     
     func setBackgroundCompletionHandler(_ completionHandler: @escaping () -> ()) {
@@ -113,10 +115,6 @@ class AudioDataManager: AudioDataManagable {
         allowCellular = preference
     }
     
-    func setDownloadDirectory(_ dir: FileManager.SearchPathDirectory) {
-        downloadDirectory = dir
-    }
-    
     func attach(callback: @escaping (_ id: ID, _ progress: Double)->()) {
         globalDownloadProgressCallback = callback
     }
@@ -125,6 +123,7 @@ class AudioDataManager: AudioDataManagable {
 // MARK:- Streaming
 extension AudioDataManager {
     func startStream(withRemoteURL url: AudioURL, callback: @escaping (StreamProgressPTO) -> ()) {
+        currentStreamFinished = false
         if let data = FileStorage.Audio.read(url.key) {
             let dto = StreamProgressDTO.init(progress: 1.0, data: data, totalBytesExpected: Int64(data.count))
             callback(StreamProgressPTO(dto: dto))
@@ -171,12 +170,12 @@ extension AudioDataManager {
         return FileStorage.Audio.locate(url.key)
     }
     
-    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL, Error?) -> ()) {
+    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL) -> ()) {
         let key = url.key
         
         if let savedUrl = FileStorage.Audio.locate(key), FileStorage.Audio.isStored(key) {
             globalDownloadProgressCallback(key, 1.0)
-            completion(savedUrl, nil)
+            completion(savedUrl)
             return
         }
         
@@ -226,14 +225,13 @@ extension AudioDataManager {
         globalDownloadProgressCallback(id, 1.0)
     }
     
+    
     private func streamDoneListener(id: ID, error: Error?) -> Bool {
         if error != nil {
             return false
         }
-        
+        currentStreamFinished = true
         downloadWorker.resumeAllActive()
         return false
     }
 }
-
-
