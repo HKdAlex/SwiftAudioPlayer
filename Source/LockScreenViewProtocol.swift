@@ -25,8 +25,9 @@
 
 import Foundation
 import MediaPlayer
+#if os(iOS)
 import UIKit
-
+#endif
 public protocol LockScreenViewPresenter : AnyObject {
     func getIsPlaying() -> Bool
     func handlePlay()

@@ -29,7 +29,7 @@ import Foundation
 public struct SAAudioAvailabilityRange {
     let startingNeedle: Needle
     let durationLoadedByNetwork: Duration
-    let predictedDurationToLoad: Duration
+public let predictedDurationToLoad: Duration
     let isPlayable: Bool
     
     public var bufferingProgress: Double {

@@ -51,12 +51,14 @@ protocol AudioDataManagable {
     func deleteStream(withRemoteURL url: AudioURL) 
     
     func getPersistedUrl(withRemoteURL url: AudioURL) -> URL?
-    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL) -> ())
+    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL, Error?) -> ())
     func cancelDownload(withRemoteURL url: AudioURL)
     func deleteDownload(withLocalURL url: URL)
 }
 
 class AudioDataManager: AudioDataManagable {
+    
+    
     var currentStreamFinishedWithDuration: Duration = 0
     
     var allowCellular: Bool = true
@@ -185,12 +187,12 @@ extension AudioDataManager {
         return FileStorage.Audio.locate(url.key)
     }
     
-    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL) -> ()) {
+    func startDownload(withRemoteURL url: AudioURL, completion: @escaping (URL, Error?) -> ()) {
         let key = url.key
         
         if let savedUrl = FileStorage.Audio.locate(key), FileStorage.Audio.isStored(key) {
             globalDownloadProgressCallback(key, 1.0)
-            completion(savedUrl)
+            completion(savedUrl, nil)
             return
         }
         

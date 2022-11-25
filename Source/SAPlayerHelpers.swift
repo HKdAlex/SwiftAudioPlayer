@@ -35,18 +35,20 @@ public typealias UTC = Int
  Use to set what will be displayed in the lockscreen.
  */
 public struct SALockScreenInfo {
-    var title: String
-    var artist: String
-    var albumTitle: String?
-    var artwork: UIImage?
-    var releaseDate: UTC
+    public var title: String
+    public var artist: String
+    public var albumTitle: String?
+    public var artwork: UIImage?
+    public var releaseDate: UTC
+    public var realmTrackIdString: String
     
-    public init(title: String, artist: String, albumTitle: String?, artwork: UIImage?, releaseDate: UTC) {
+    public init(title: String, artist: String, albumTitle: String?, artwork: UIImage?, releaseDate: UTC, realmTrackIdString: String) {
         self.title = title
         self.artist = artist
         self.albumTitle = albumTitle
         self.artwork = artwork
         self.releaseDate = releaseDate
+        self.realmTrackIdString = realmTrackIdString
     }
 }
 

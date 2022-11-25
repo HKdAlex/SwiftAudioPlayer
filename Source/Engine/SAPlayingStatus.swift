@@ -26,7 +26,7 @@
 
 import Foundation
 
-public enum SAPlayingStatus {
+public enum SAPlayingStatus: String {
     case playing
     case paused
     case buffering
