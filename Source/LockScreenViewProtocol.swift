@@ -90,7 +90,9 @@ public extension LockScreenViewProtocol {
             }
         } else {
             nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: UIImage().size) { size in
+                
                 return UIImage()
+                
             }
         }
         

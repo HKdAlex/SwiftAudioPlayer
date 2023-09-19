@@ -24,7 +24,9 @@
 //  THE SOFTWARE.
 
 import Foundation
+#if os(iOS)
 import UIKit
+#endif
 
 /**
  UTC corresponds to epoch time (number of seconds that have elapsed since January 1, 1970, midnight UTC/GMT). https://www.epochconverter.com/ is a useful site to convert to human readable format.
@@ -38,9 +40,16 @@ public struct SALockScreenInfo {
     public var title: String
     public var artist: String
     public var albumTitle: String?
+#if os(iOS)
     public var artwork: UIImage?
+    #else
+    public var artwork: NSImage?
+#endif
     public var releaseDate: UTC
     public var realmTrackIdString: String
+    
+    
+    #if os(iOS)
     
     public init(title: String, artist: String, albumTitle: String?, artwork: UIImage?, releaseDate: UTC, realmTrackIdString: String) {
         self.title = title
@@ -50,6 +59,20 @@ public struct SALockScreenInfo {
         self.releaseDate = releaseDate
         self.realmTrackIdString = realmTrackIdString
     }
+    
+    #else
+    
+    public init(title: String, artist: String, albumTitle: String?, artwork: NSImage?, releaseDate: UTC, realmTrackIdString: String) {
+        self.title = title
+        self.artist = artist
+        self.albumTitle = albumTitle
+        self.artwork = artwork
+        self.releaseDate = releaseDate
+        self.realmTrackIdString = realmTrackIdString
+    }
+    
+    #endif
+    
 }
 
 
