@@ -202,10 +202,10 @@ extension AudioDataManager {
         }
         
         // TODO: check if we already streaming and convert streaming to download when we have persistent play button
-        guard streamWorker.getRunningID() != key else {
-            Log.debug("already streaming audio, don't need to download key: \(key)")
-            return
-        }
+//        guard streamWorker.getRunningID() != key else {
+//            Log.debug("already streaming audio, don't need to download key: \(key)")
+//            return
+//        }
         
         downloadWorker.start(withID: key, withRemoteUrl: url, completion: completion)
     }
