@@ -205,7 +205,7 @@ extension AudioDataManager {
         guard streamWorker.getRunningID() != key else {
             Log.debug("already streaming audio, don't need to download key: \(key)")
             return
-//        }
+        }
         
         downloadWorker.start(withID: key, withRemoteUrl: url, completion: completion)
     }
