@@ -21,7 +21,7 @@ enum LogLevel: Int {
 }
 
 // Specify which types of log messages to display. Default level is set to WARN, which means Log will print any log messages of type only WARN, ERROR, MONITOR, and TEST. To print DEBUG and INFO logs, set the level to a lower value.
-var logLevel: LogLevel = LogLevel.MONITOR
+public var logLevel: LogLevel = LogLevel.MONITOR
 
 class Log {
     private init() {}
