@@ -37,6 +37,13 @@ public class SAPlayer {
         }
     }
     
+    
+    public var LOG_LEVEL: LogLevel = LogLevel.MONITOR {
+        didSet {
+            logLevel = LOG_LEVEL
+        }
+    }
+    
     /**
      Access to the player.
      */
