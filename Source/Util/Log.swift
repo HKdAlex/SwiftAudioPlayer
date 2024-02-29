@@ -10,7 +10,7 @@ import Foundation
 import os.log
 
 // Possible levels of log messages to log
-enum LogLevel: Int {
+public enum LogLevel: Int {
     case DEBUG = 1
     case INFO = 2
     case WARN = 3
