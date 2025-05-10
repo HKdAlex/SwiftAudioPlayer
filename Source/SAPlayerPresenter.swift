@@ -26,7 +26,9 @@
 import Foundation
 import AVFoundation
 import MediaPlayer
-
+#if os(iOS)
+import UIKit // Added for UIBackgroundTaskIdentifier
+#endif
 class SAPlayerPresenter {
     weak var delegate: SAPlayerDelegate?
     var shouldPlayImmediately = false //for auto-play
@@ -221,6 +223,16 @@ extension SAPlayerPresenter {
             Log.info("no queued audio")
             return
         }
+
+        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SAPlayer.PlayNextTrack") {
+            // Expiration handler
+            Log.warn("Background task for playing next track expired.")
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
+
         let nextAudioURL = audioQueue.removeFirst()
 
         Log.info("getting ready to play \(nextAudioURL)")
@@ -240,5 +252,11 @@ extension SAPlayerPresenter {
         }
         
         shouldPlayImmediately = true
+
+        // End the background task once the next track is initiated
+        if backgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
     }
 }
