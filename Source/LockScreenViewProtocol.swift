@@ -25,8 +25,10 @@
 
 import Foundation
 import MediaPlayer
-#if os(iOS)
+#if os(iOS) || os(tvOS) // UIKit for UIImage
 import UIKit
+#elseif os(macOS) // AppKit for NSImage
+import AppKit
 #endif
 public protocol LockScreenViewPresenter : AnyObject {
     func getIsPlaying() -> Bool
@@ -84,16 +86,37 @@ public extension LockScreenViewProtocol {
         nowPlayingInfo[MPMediaItemPropertyReleaseDate] = Date(timeIntervalSince1970: TimeInterval(releaseDate))
 
         if let artwork = info.artwork {
+            #if os(iOS) || os(tvOS)
+            if let uiImageArtwork = artwork as? UIImage {
+                nowPlayingInfo[MPMediaItemPropertyArtwork] =
+                    MPMediaItemArtwork(boundsSize: uiImageArtwork.size) { _ in // size parameter in closure is unused
+                        return uiImageArtwork
+                }
+            }
+            #elseif os(macOS)
+            // artwork is already an unwrapped NSImage here from the outer optional binding `if let artwork = info.artwork`.
+            // The type of info.artwork is NSImage? for macOS, so the outer `if let` makes `artwork` here `NSImage`.
             nowPlayingInfo[MPMediaItemPropertyArtwork] =
-            MPMediaItemArtwork(boundsSize: artwork.size) { size in
-                return artwork
+                MPMediaItemArtwork(boundsSize: artwork.size) { _ in // artwork is NSImage
+                    return artwork // artwork is NSImage
             }
+            #endif
         } else {
-            nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: UIImage().size) { size in
-                
-                return UIImage()
-                
+            // Fallback for no artwork - use an empty image appropriate for the platform
+            #if os(iOS) || os(tvOS)
+            let emptyImage = UIImage()
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: emptyImage.size) { _ in
+                return emptyImage
             }
+            #elseif os(macOS)
+            let emptyImage = NSImage()
+            // For NSImage, ensure size is not zero if required by MPMediaItemArtwork, or provide a minimal valid size.
+            // Default NSImage().size might be (0,0). Using a small default if so.
+            let imageSize = (emptyImage.size.width == 0 && emptyImage.size.height == 0) ? CGSize(width: 1, height: 1) : emptyImage.size
+            nowPlayingInfo[MPMediaItemPropertyArtwork] = MPMediaItemArtwork(boundsSize: imageSize) { _ in
+                return emptyImage
+            }
+            #endif
         }
         
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nowPlayingInfo

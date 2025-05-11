@@ -224,6 +224,7 @@ extension SAPlayerPresenter {
             return
         }
 
+        #if os(iOS)
         var backgroundTask: UIBackgroundTaskIdentifier = .invalid
 
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SAPlayer.PlayNextTrack") {
@@ -232,6 +233,7 @@ extension SAPlayerPresenter {
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
         }
+        #endif
 
         let nextAudioURL = audioQueue.removeFirst()
 
@@ -253,10 +255,12 @@ extension SAPlayerPresenter {
         
         shouldPlayImmediately = true
 
+        #if os(iOS)
         // End the background task once the next track is initiated
         if backgroundTask != .invalid {
             UIApplication.shared.endBackgroundTask(backgroundTask)
             backgroundTask = .invalid
         }
+        #endif
     }
 }

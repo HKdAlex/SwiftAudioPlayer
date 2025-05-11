@@ -24,8 +24,10 @@
 //  THE SOFTWARE.
 
 import Foundation
-#if os(iOS)
+#if os(iOS) || os(tvOS)
 import UIKit
+#elseif os(macOS)
+import AppKit // For NSImage
 #endif
 
 /**
@@ -40,16 +42,18 @@ public struct SALockScreenInfo {
     public var title: String
     public var artist: String
     public var albumTitle: String?
-#if os(iOS)
+#if os(iOS) || os(tvOS) // UIImage for iOS and tvOS
     public var artwork: UIImage?
-    #else
+#elseif os(macOS) // NSImage for macOS
     public var artwork: NSImage?
+#else
+    public var artwork: Any? // Fallback for other platforms
 #endif
     public var releaseDate: UTC
     public var realmTrackIdString: String
     
     
-    #if os(iOS)
+#if os(iOS) || os(tvOS)
     
     public init(title: String, artist: String, albumTitle: String?, artwork: UIImage?, releaseDate: UTC, realmTrackIdString: String) {
         self.title = title
@@ -60,7 +64,7 @@ public struct SALockScreenInfo {
         self.realmTrackIdString = realmTrackIdString
     }
     
-    #else
+#elseif os(macOS)
     
     public init(title: String, artist: String, albumTitle: String?, artwork: NSImage?, releaseDate: UTC, realmTrackIdString: String) {
         self.title = title
@@ -70,8 +74,18 @@ public struct SALockScreenInfo {
         self.releaseDate = releaseDate
         self.realmTrackIdString = realmTrackIdString
     }
-    
-    #endif
+
+#else
+    // Fallback initializer for other platforms
+    public init(title: String, artist: String, albumTitle: String?, artwork: Any?, releaseDate: UTC, realmTrackIdString: String) {
+        self.title = title
+        self.artist = artist
+        self.albumTitle = albumTitle
+        self.artwork = artwork
+        self.releaseDate = releaseDate
+        self.realmTrackIdString = realmTrackIdString
+    }
+#endif
     
 }
 

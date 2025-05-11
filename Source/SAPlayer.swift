@@ -261,7 +261,9 @@ public class SAPlayer {
         }
         
         audioModifiers.append(AVAudioUnitTimePitch(audioComponentDescription: componentDescription))
+        #if os(iOS) || os(tvOS)
         NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
+        #endif
     }
     
     /**
@@ -302,6 +304,7 @@ public class SAPlayer {
         presenter.addUrlToKeyMap(url)
     }
     
+    #if os(iOS) || os(tvOS)
     @objc func handleInterruption(notification: Notification) {
         guard let userInfo = notification.userInfo,
             let typeValue = userInfo[AVAudioSessionInterruptionTypeKey] as? UInt,
@@ -330,7 +333,8 @@ public class SAPlayer {
 
         default: ()
         }
-    }	
+    }
+    #endif
 }
 
 public enum SAPlayerBitrate {
@@ -582,16 +586,19 @@ extension SAPlayer: SAPlayerDelegate {
     
     //Start taking control as the device's player
     private func becomeDeviceAudioPlayer() {
+        #if os(iOS) || os(tvOS)
         do {
             if #available(iOS 11.0, tvOS 11.0, *) {
                 try AVAudioSession.sharedInstance().setCategory(.playback, mode: .spokenAudio, policy: .longFormAudio, options: [])
             } else {
+                // Fallback on earlier versions
                 try AVAudioSession.sharedInstance().setCategory(AVAudioSession.Category.playback, mode: AVAudioSession.Mode(rawValue: convertFromAVAudioSessionMode(AVAudioSession.Mode.default)), options: .allowAirPlay)
             }
             try AVAudioSession.sharedInstance().setActive(true, options: .notifyOthersOnDeactivation)
         } catch {
             Log.monitor("Problem setting up AVAudioSession to play in:: \(error.localizedDescription)")
         }
+        #endif
     }
     
     internal func pauseEngine() {
@@ -606,6 +613,8 @@ extension SAPlayer: SAPlayerDelegate {
 
 
 // Helper function inserted by Swift 4.2 migrator.
+#if os(iOS) || os(tvOS)
 fileprivate func convertFromAVAudioSessionMode(_ input: AVAudioSession.Mode) -> String {
 	return input.rawValue
 }
+#endif
