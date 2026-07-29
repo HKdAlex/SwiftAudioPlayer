@@ -1,5 +1,10 @@
 #  Changelog
 
+## 8.0.13
+
+- Resume after call/VoIP interruption: re-activate `AVAudioSession`, restart engine if needed, then play (upstream #154/#168 / PB-03). Observe route changes for headphone unplug.
+
+
 ## 8.0.12
 
 - Hold `UIBackgroundTask` for queue advance until `PlayingStatus.playing` or stream buffer ready (fixes locked-device next-track stall; upstream #162 / PB-02). See `docs/manual-repro-locked-next-track.md`.
