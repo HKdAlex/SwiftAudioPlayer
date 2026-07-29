@@ -263,6 +263,7 @@ public class SAPlayer {
         audioModifiers.append(AVAudioUnitTimePitch(audioComponentDescription: componentDescription))
         #if os(iOS) || os(tvOS)
         NotificationCenter.default.addObserver(self, selector: #selector(handleInterruption), name: AVAudioSession.interruptionNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(handleRouteChange), name: AVAudioSession.routeChangeNotification, object: nil)
         #endif
     }
     
@@ -312,26 +313,68 @@ public class SAPlayer {
                 return
         }
 
-        // Switch over the interruption type.
         switch type {
 
         case .began:
-            // An interruption began. Update the UI as necessary.
+            Log.info("AVAudioSession interruption began — pausing")
             pause()
 
         case .ended:
-           // An interruption ended. Resume playback, if appropriate.
-
-            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else { return }
+            // Phone / WhatsApp / VoIP: plain play() often fails because the session is
+            // inactive and AVAudioEngine was stopped (upstream #154 / #168).
+            guard let optionsValue = userInfo[AVAudioSessionInterruptionOptionKey] as? UInt else {
+                Log.info("AVAudioSession interruption ended without options — not resuming")
+                return
+            }
             let options = AVAudioSession.InterruptionOptions(rawValue: optionsValue)
             if options.contains(.shouldResume) {
-                // An interruption ended. Resume playback.
-                play()
+                Log.info("AVAudioSession interruption ended with shouldResume — recovering session + engine")
+                resumeAfterInterruption()
             } else {
-                // An interruption ended. Don't resume playback.
+                Log.info("AVAudioSession interruption ended without shouldResume — leaving paused")
             }
 
-        default: ()
+        @unknown default:
+            ()
+        }
+    }
+
+    /// Re-activate the audio session, restart AVAudioEngine if needed, then play.
+    private func resumeAfterInterruption() {
+        becomeDeviceAudioPlayer()
+        // Small defer helps VoIP stack release the session before we reclaim it.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) { [weak self] in
+            guard let self = self else { return }
+            self.becomeDeviceAudioPlayer()
+            self.playEngine()
+            // If the engine was still cold, a second play pass after a beat recovers #168 class failures.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                guard let self = self else { return }
+                if self.player == nil {
+                    Log.warn("resumeAfterInterruption: no player engine — cannot resume")
+                    return
+                }
+                self.playEngine()
+            }
+        }
+    }
+
+    @objc func handleRouteChange(notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let reasonValue = userInfo[AVAudioSessionRouteChangeReasonKey] as? UInt,
+              let reason = AVAudioSession.RouteChangeReason(rawValue: reasonValue) else {
+            return
+        }
+
+        switch reason {
+        case .oldDeviceUnavailable:
+            // Headphones unplugged — system usually pauses; keep our state consistent.
+            Log.info("AVAudioSession route: oldDeviceUnavailable — pausing")
+            pause()
+        case .newDeviceAvailable:
+            Log.info("AVAudioSession route: newDeviceAvailable")
+        default:
+            ()
         }
     }
     #endif
