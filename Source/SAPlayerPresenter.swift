@@ -45,6 +45,15 @@ class SAPlayerPresenter {
     var needleRef: UInt = 0
     var playingStatusRef: UInt = 0
     var audioQueue: [SAAudioQueueItem] = []
+
+    #if os(iOS)
+    /// Keeps the process awake while the next remote track buffers after a queue advance (upstream #162 / PB-02).
+    private var playNextBackgroundTask: UIBackgroundTaskIdentifier = .invalid
+    private var playNextPlayingSubscriptionId: UInt?
+    private var playNextBufferSubscriptionId: UInt?
+    private var playNextTimeoutWorkItem: DispatchWorkItem?
+    private let playNextBackgroundTimeoutSeconds: TimeInterval = 30
+    #endif
     
     init(delegate: SAPlayerDelegate?) {
         self.delegate = delegate
@@ -83,6 +92,15 @@ class SAPlayerPresenter {
                 self.playNextAudioIfExists()
             }
         })
+    }
+
+    deinit {
+        #if os(iOS)
+        endPlayNextBackgroundWork(reason: "presenter-deinit")
+        #endif
+        AudioClockDirector.shared.detachFromChangesInDuration(withID: durationRef)
+        AudioClockDirector.shared.detachFromChangesInNeedle(withID: needleRef)
+        AudioClockDirector.shared.detachFromChangesInPlayingStatus(withID: playingStatusRef)
     }
     
     func getUrl(forKey key: Key) -> URL? {
@@ -217,6 +235,60 @@ extension SAPlayerPresenter: AudioEngineDelegate {
 
 //MARK:- Autoplay
 extension SAPlayerPresenter {
+    #if os(iOS)
+    /// Ends the play-next background task and any readiness subscriptions.
+    /// 8.0.10 began a UIBackgroundTask but ended it immediately after starting the stream —
+    /// iOS then suspends before remote buffering completes when the device is locked.
+    private func endPlayNextBackgroundWork(reason: String) {
+        if let id = playNextPlayingSubscriptionId {
+            AudioClockDirector.shared.detachFromChangesInPlayingStatus(withID: id)
+            playNextPlayingSubscriptionId = nil
+        }
+        if let id = playNextBufferSubscriptionId {
+            AudioClockDirector.shared.detachFromChangesInBufferedRange(withID: id)
+            playNextBufferSubscriptionId = nil
+        }
+        playNextTimeoutWorkItem?.cancel()
+        playNextTimeoutWorkItem = nil
+
+        guard playNextBackgroundTask != .invalid else { return }
+        Log.info("Ending SAPlayer.PlayNextTrack background work: \(reason)")
+        UIApplication.shared.endBackgroundTask(playNextBackgroundTask)
+        playNextBackgroundTask = .invalid
+    }
+
+    private func beginPlayNextBackgroundHold() {
+        endPlayNextBackgroundWork(reason: "superseded by new play-next")
+
+        playNextBackgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SAPlayer.PlayNextTrack") { [weak self] in
+            Log.warn("Background task for playing next track expired.")
+            self?.endPlayNextBackgroundWork(reason: "expired")
+        }
+
+        // Prefer PlayingStatus.playing; also accept buffer-ready so we do not hold forever
+        // if play() is delayed after the stream becomes playable.
+        playNextPlayingSubscriptionId = AudioClockDirector.shared.attachToChangesInPlayingStatus(closure: { [weak self] status in
+            guard let self = self else { throw DirectorError.closureIsDead }
+            if status == .playing {
+                self.endPlayNextBackgroundWork(reason: "playing")
+            }
+        })
+
+        playNextBufferSubscriptionId = AudioClockDirector.shared.attachToChangesInBufferedRange(closure: { [weak self] buffer in
+            guard let self = self else { throw DirectorError.closureIsDead }
+            if buffer.isReadyForPlaying {
+                self.endPlayNextBackgroundWork(reason: "buffer-ready")
+            }
+        })
+
+        let timeout = DispatchWorkItem { [weak self] in
+            self?.endPlayNextBackgroundWork(reason: "timeout-\(Int(self?.playNextBackgroundTimeoutSeconds ?? 30))s")
+        }
+        playNextTimeoutWorkItem = timeout
+        DispatchQueue.main.asyncAfter(deadline: .now() + playNextBackgroundTimeoutSeconds, execute: timeout)
+    }
+    #endif
+
     func playNextAudioIfExists() {
         Log.info("looking foor next audio in queue to play")
         guard audioQueue.count > 0 else {
@@ -225,14 +297,7 @@ extension SAPlayerPresenter {
         }
 
         #if os(iOS)
-        var backgroundTask: UIBackgroundTaskIdentifier = .invalid
-
-        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "SAPlayer.PlayNextTrack") {
-            // Expiration handler
-            Log.warn("Background task for playing next track expired.")
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
-        }
+        beginPlayNextBackgroundHold()
         #endif
 
         let nextAudioURL = audioQueue.removeFirst()
@@ -254,13 +319,6 @@ extension SAPlayerPresenter {
         }
         
         shouldPlayImmediately = true
-
-        #if os(iOS)
-        // End the background task once the next track is initiated
-        if backgroundTask != .invalid {
-            UIApplication.shared.endBackgroundTask(backgroundTask)
-            backgroundTask = .invalid
-        }
-        #endif
+        // Do not end the iOS background task here — wait for playing / buffer-ready / timeout / expire.
     }
 }
