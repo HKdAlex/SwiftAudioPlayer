@@ -80,6 +80,13 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
     fileprivate var totalBytesExpectedForCurrentStream: Int64?
     fileprivate var totalBytesReceived: Int64 = 0
     private var corruptedBecauseOfSeek = false
+    /// Absolute file byte where the current Range request started (0 for full GET).
+    private var streamRangeStartByte: UInt64 = 0
+    /// Skip doneCallback when we cancel the task ourselves to retry after a drop.
+    private var isRecoveringFromNetworkLoss = false
+    private var networkRecoveryAttempts = 0
+    private let maxNetworkRecoveryAttempts = 5
+    private var networkRecoveryWorkItem: DispatchWorkItem?
     
     
     /// Init
@@ -107,6 +114,8 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
         self.id = id
         self.url = url
         self.previousTotalBytesExpectedFromInitalData = previousTotalBytesExpected
+        self.networkRecoveryAttempts = 0
+        self.isRecoveringFromNetworkLoss = false
         
         if let data = data {
             var request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: TIMEOUT)
@@ -116,7 +125,9 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
             task?.taskDescription = id
             
             initialDataBytesCount = Int64(data.count)
-            totalBytesReceived = initialDataBytesCount
+            streamRangeStartByte = UInt64(data.count)
+            // Bytes already in hand are not part of this Range body; track absolute via range start + received.
+            totalBytesReceived = 0
             totalBytesExpectedForWholeFile = previousTotalBytesExpected
             
             let progress = previousTotalBytesExpected != nil ? Double(initialDataBytesCount)/Double(previousTotalBytesExpected!) : 0
@@ -127,6 +138,7 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
             
             task?.resume()
         } else {
+            streamRangeStartByte = 0
             var request = URLRequest(url: url)
             HTTPHeaderFields?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
             task = session.dataTask(with: request)
@@ -136,6 +148,8 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
     }
     
     private func killPreviousTaskIfNeeded() {
+        networkRecoveryWorkItem?.cancel()
+        networkRecoveryWorkItem = nil
         guard let task = task else {return}
         if task.state == .running || task.state == .suspended {
             task.cancel()
@@ -145,6 +159,76 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
         totalBytesExpectedForWholeFile = nil
         totalBytesReceived = 0
         initialDataBytesCount = 0
+        streamRangeStartByte = 0
+        isRecoveringFromNetworkLoss = false
+        networkRecoveryAttempts = 0
+    }
+
+    /// Absolute byte offset already obtained for the current URL (for Range resume).
+    private var absoluteBytesReceived: UInt64 {
+        return streamRangeStartByte + UInt64(max(0, totalBytesReceived))
+    }
+
+    private func isTransientNetworkError(_ err: NSError) -> Bool {
+        guard err.domain == NSURLErrorDomain else { return false }
+        switch err.code {
+        case NSURLErrorNetworkConnectionLost,
+             NSURLErrorNotConnectedToInternet,
+             NSURLErrorTimedOut,
+             NSURLErrorCannotConnectToHost,
+             NSURLErrorDNSLookupFailed,
+             NSURLErrorInternationalRoamingOff,
+             NSURLErrorDataNotAllowed,
+             NSURLErrorCannotFindHost:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Restart the Range request from the last absolute byte without treating cancel as stream end.
+    private func scheduleNetworkRecovery(id: ID, after error: NSError) {
+        guard networkRecoveryAttempts < maxNetworkRecoveryAttempts else {
+            Log.error("network recovery exhausted after \(maxNetworkRecoveryAttempts) attempts — surfacing error")
+            isRecoveringFromNetworkLoss = false
+            let _ = doneCallback(id, error)
+            return
+        }
+        networkRecoveryAttempts += 1
+        let delay = min(8.0, pow(2.0, Double(networkRecoveryAttempts - 1)) * 0.5)
+        let offset = absoluteBytesReceived
+        Log.warn("transient network error (\(error.code)) — recovery attempt \(networkRecoveryAttempts)/\(maxNetworkRecoveryAttempts) from byte \(offset) in \(delay)s")
+
+        isRecoveringFromNetworkLoss = true
+        if let task = task, task.state == .running || task.state == .suspended {
+            task.cancel()
+        }
+        self.task = nil
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self = self, self.id == id, let url = self.url else { return }
+            self.startRangedStream(id: id, url: url, fromByte: offset, announceEmptyProgress: false)
+            self.isRecoveringFromNetworkLoss = false
+        }
+        networkRecoveryWorkItem?.cancel()
+        networkRecoveryWorkItem = work
+        DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
+    private func startRangedStream(id: ID, url: URL, fromByte offset: UInt64, announceEmptyProgress: Bool) {
+        streamRangeStartByte = offset
+        totalBytesReceived = 0
+        var request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: TIMEOUT)
+        HTTPHeaderFields?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
+        if offset > 0 {
+            request.addValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
+        }
+        task = session.dataTask(with: request)
+        task?.taskDescription = id
+        if announceEmptyProgress {
+            progressCallback(id, StreamProgressDTO(progress: 0, data: Data(), totalBytesExpected: totalBytesExpectedForWholeFile))
+        }
+        task?.resume()
     }
     
     func pause(withId id: ID) {
@@ -218,16 +302,14 @@ class AudioStreamWorker:NSObject, AudioDataStreamable {
             Log.monitor("tried to seek without having URL")
             return
         }
+        networkRecoveryWorkItem?.cancel()
+        networkRecoveryWorkItem = nil
+        networkRecoveryAttempts = 0
+        isRecoveringFromNetworkLoss = true
         stop(withId: id)
-        totalBytesReceived = 0
         corruptedBecauseOfSeek = true
-        self.progressCallback(id, StreamProgressDTO(progress: 0, data: Data(), totalBytesExpected: totalBytesExpectedForWholeFile))
-        
-        var request = URLRequest(url: url, cachePolicy: .useProtocolCachePolicy, timeoutInterval: TIMEOUT)
-        HTTPHeaderFields?.forEach { request.setValue($1, forHTTPHeaderField: $0) }
-        request.addValue("bytes=\(offset)-", forHTTPHeaderField: "Range")
-        task = session.dataTask(with: request)
-        task?.resume()
+        isRecoveringFromNetworkLoss = false
+        startRangedStream(id: id, url: url, fromByte: offset, announceEmptyProgress: true)
     }
     
     
@@ -265,10 +347,12 @@ extension AudioStreamWorker: URLSessionDataDelegate {
         }
         
         totalBytesReceived = totalBytesReceived + Int64(data.count)
-        let progress = Double(totalBytesReceived)/Double(totalBytesExpected)
+        let absoluteReceived = Int64(self.absoluteBytesReceived)
+        let progressBase = totalBytesExpectedForWholeFile ?? totalBytesExpected
+        let progress = progressBase > 0 ? Double(absoluteReceived)/Double(progressBase) : 0
         
         Log.debug("network streaming progress \(progress)")
-        self.progressCallback(id, StreamProgressDTO(progress: progress, data: data, totalBytesExpected: totalBytesExpected))
+        self.progressCallback(id, StreamProgressDTO(progress: progress, data: data, totalBytesExpected: totalBytesExpectedForWholeFile ?? totalBytesExpected))
     }
     
     func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive response: URLResponse, completionHandler: @escaping (URLSession.ResponseDisposition) -> Void) {
@@ -308,14 +392,18 @@ extension AudioStreamWorker: URLSessionDataDelegate {
         
         if let err: NSError = error as NSError? {
             if err.domain == NSURLErrorDomain && err.code == NSURLErrorCancelled {
+                if isRecoveringFromNetworkLoss {
+                    Log.info("cancelled stream task for network recovery — not completing stream")
+                    return
+                }
                 Log.info("cancelled downloading")
                 let _ = doneCallback(id, nil)
                 return
             }
             
-            if err.domain == NSURLErrorDomain && err.code == NSURLErrorNetworkConnectionLost {
-                Log.error("lost connection")
-                let _ = doneCallback(id, nil)
+            if isTransientNetworkError(err) {
+                // Previously called doneCallback(id, nil) on connection lost — silent stall (upstream #158/#186).
+                scheduleNetworkRecovery(id: id, after: err)
                 return
             }
             
@@ -325,6 +413,7 @@ extension AudioStreamWorker: URLSessionDataDelegate {
             return
         }
         
+        networkRecoveryAttempts = 0
         let shouldSave = doneCallback(id, nil)
         if shouldSave && !corruptedBecauseOfSeek {
             // TODO want to save file after streaming so we do not have to download again
