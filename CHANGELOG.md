@@ -1,5 +1,10 @@
 #  Changelog
 
+## 8.0.14
+
+- Retry streaming with HTTP Range after transient network loss instead of silently completing (upstream #158/#186 / PB-04).
+
+
 ## 8.0.13
 
 - Resume after call/VoIP interruption: re-activate `AVAudioSession`, restart engine if needed, then play (upstream #154/#168 / PB-03). Observe route changes for headphone unplug.
