@@ -51,6 +51,9 @@ public class SAPlayer {
     
     private var presenter: SAPlayerPresenter!
     private var player: AudioEngine?
+    /// Car Bluetooth / CarPlay drops pause playback; resume if the route returns quickly.
+    private var routeResume = RouteResumePolicy()
+    private var pausingForRouteLoss = false
     
     /**
     Any necessary header fields for streaming and downloading requests can be set here.
@@ -368,11 +371,24 @@ public class SAPlayer {
 
         switch reason {
         case .oldDeviceUnavailable:
-            // Headphones unplugged — system usually pauses; keep our state consistent.
-            Log.info("AVAudioSession route: oldDeviceUnavailable — pausing")
-            pause()
+            // Headphones unplugged, or a car Bluetooth / CarPlay blip.
+            // A blip that returns an external route within the grace window resumes.
+            // A real unplug (only the phone speaker remains) stays paused.
+            let wasPlaying = player?.playingStatus == .playing || player?.state == .resumed
+            routeResume.externalRouteLost(wasPlaying: wasPlaying, now: Date())
+            Log.info("AVAudioSession route: oldDeviceUnavailable — pausing wasPlaying=\(wasPlaying)")
+            if wasPlaying {
+                pausingForRouteLoss = true
+                pause()
+                pausingForRouteLoss = false
+            }
         case .newDeviceAvailable:
-            Log.info("AVAudioSession route: newDeviceAvailable")
+            let external = Self.currentRouteIsExternal()
+            Log.info("AVAudioSession route: newDeviceAvailable external=\(external)")
+            if routeResume.externalRouteReturned(now: Date(), outputIsExternal: external) {
+                Log.info("AVAudioSession route returned within grace — resuming")
+                resumeAfterInterruption()
+            }
         default:
             ()
         }
@@ -405,6 +421,7 @@ extension SAPlayer {
      - Note: If you are streaming, wait till the status from `SAPlayer.Updates.PlayingStatus` is not `.buffering`.
      */
     public func play() {
+        routeResume.cancelPendingResume()
         presenter.handlePlay()
     }
     
@@ -414,6 +431,9 @@ extension SAPlayer {
      - Note:If you are streaming, wait till the status from `SAPlayer.Updates.PlayingStatus` is not `.buffering`.
      */
     public func pause() {
+        if !pausingForRouteLoss {
+            routeResume.userPaused()
+        }
         presenter.handlePause()
     }
     
@@ -647,6 +667,14 @@ extension SAPlayer: SAPlayerDelegate {
     internal func pauseEngine() {
         player?.pause()
     }
+
+    #if os(iOS) || os(tvOS)
+    private static func currentRouteIsExternal() -> Bool {
+        AVAudioSession.sharedInstance().currentRoute.outputs.contains { port in
+            RouteResumePolicy.isExternalOutput(portType: port.portType.rawValue)
+        }
+    }
+    #endif
     
     internal func seekEngine(toNeedle needle: Needle) {
         let seekToNeedle = needle < 0 ? 0 : needle
