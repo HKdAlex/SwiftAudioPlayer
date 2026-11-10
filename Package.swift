@@ -24,6 +24,11 @@ let package = Package(
         .target(
             name: "SwiftAudioPlayer",
             path: "Source"
+        ),
+        .testTarget(
+            name: "SwiftAudioPlayerTests",
+            dependencies: ["SwiftAudioPlayer"],
+            path: "Tests"
         )
     ],
     swiftLanguageVersions: [.v5]

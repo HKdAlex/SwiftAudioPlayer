@@ -1,5 +1,10 @@
 #  Changelog
 
+## 8.0.15
+
+- After a car Bluetooth / CarPlay route drop, resume if an external route returns within 8 seconds. A real headphone unplug stays paused. An explicit pause during that window stays paused (apple#478).
+
+
 ## 8.0.14
 
 - Retry streaming with HTTP Range after transient network loss instead of silently completing (upstream #158/#186 / PB-04).
